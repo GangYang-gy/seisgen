@@ -36,6 +36,7 @@ def DRotationMatrix(strike, dip, rake):
     '''
     * Calculate the rotation matrix for the given focal mechanism.
     * Using the Equ (10) in Carl's Paper (2015).
+
     :param strike: The strike in radians. k[kappa] ranging [0, 2pi]
     :param dip:     The dip in radians. the theta ranging [0, pi/2]
     :param rake:    The slip angle or the rake angle. the sigma ranging [-pi/2, pi/2]

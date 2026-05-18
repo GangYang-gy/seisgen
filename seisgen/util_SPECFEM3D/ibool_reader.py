@@ -9,12 +9,10 @@ from seisgen.util_SPECFEM3D import NGLLX, NGLLY, NGLLZ, CONSTANT_INDEX_27_GLL
 from scipy.io import FortranFile
 import numpy as np
 
-
 def read_ibool_by_scipy(ibool_file, NSPEC):
     '''
         Read the ibool file in the folder */model3D/
     '''
-
     f = FortranFile(ibool_file, 'r')
     ibool = f.read_reals(dtype='int32')
     f.close()
@@ -41,12 +39,11 @@ def DEnquire_Element(ibool_file, index_element, NSPEC):
         gll_array = ibool[index_element][CONSTANT_INDEX_27_GLL]
 
         # sort the index.
-        gll_points = []
+        gll_points = np.zeros(27)
         gll_array = np.reshape(gll_array, [NGLLZ_N3, NGLLY_N3, NGLLX_N3])
-        for i in range(NGLLX_N3):
-            for j in range(NGLLY_N3):
-                for k in range(NGLLZ_N3):
-                    gll_points.append(gll_array[k, j, i])
-        gll_points = np.asarray(gll_points)
+        for iz in range(NGLLZ_N3):
+            for iy in range(NGLLY_N3):
+                for ix in range(NGLLX_N3):
+                    gll_points[iz*9+iy*3+ix] = gll_array[iz, iy, ix]
 
         return gll_points

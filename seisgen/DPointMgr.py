@@ -1,11 +1,13 @@
 # -------------------------------------------------------------------
-# Tools to manage the pre-computed grids in the 3D background model.
+# Optimized Tools to manage the pre-computed grids in the 3D background model.
 # Author: Liang Ding
 # Email: myliang.ding@mail.utoronto.ca
+# Optimized: Gang (2025) using cKDTree
 # -------------------------------------------------------------------
 
 import h5py
 import numpy as np
+from scipy.spatial import cKDTree
 
 POINT_KEYS = ["latitude",
              "longitude",
@@ -20,16 +22,16 @@ POINT_KEYS = ["latitude",
              "eta",
              "gamma"]
 
+class DPointCloud:
+    """
+    Point-cloud manager for pre-computed grid information in the 3-D model.
 
-class DPointCloud():
-    ''' The pre-computed information (see POINT_KEYS) of user-selected points in the 3D background model. '''
+    The HDF5 file is expected to contain all datasets listed in POINT_KEYS.
+    This optimized version uses cKDTree for fast nearest-neighbor queries
+    when depth is used as the vertical coordinate.
+    """
 
     def __init__(self, file_path):
-        '''
-        :param file_path:  The HDF5 file storing the pre-computed information (see POINT_KEYS)
-                           of user-selected points in the 3D background model.
-        '''
-
         self.b_pointcloud_initial = False
         if file_path is None:
             return
@@ -38,8 +40,8 @@ class DPointCloud():
             with h5py.File(file_path, 'r') as f:
                 self.mesh_lat           = f[POINT_KEYS[0]][:]
                 self.mesh_long          = f[POINT_KEYS[1]][:]
-                self.mesh_z             = f[POINT_KEYS[2]][:]    # in meter
-                self.mesh_depth         = f[POINT_KEYS[3]][:]    # in meter.
+                self.mesh_z             = f[POINT_KEYS[2]][:]    # Elevation in meters
+                self.mesh_depth         = f[POINT_KEYS[3]][:]    # Depth in meters
                 self.mesh_utm_x         = f[POINT_KEYS[4]][:]
                 self.mesh_utm_y         = f[POINT_KEYS[5]][:]
                 self.mesh_utm_z         = f[POINT_KEYS[6]][:]
@@ -49,71 +51,104 @@ class DPointCloud():
                 self.mesh_eta           = f[POINT_KEYS[10]][:]
                 self.mesh_gamma         = f[POINT_KEYS[11]][:]
 
+            # Build a KDTree for UTM coordinates using depth as the vertical coordinate.
+            utm_points = np.vstack([self.mesh_utm_x, self.mesh_utm_y, self.mesh_depth]).T
+            self.tree_utm = cKDTree(utm_points)
+
+            # Build a KDTree for latitude/longitude coordinates using depth.
+            latlong_points = np.vstack([111000.0*self.mesh_lat, 111000.0*self.mesh_long, self.mesh_depth]).T
+            self.tree_latlong = cKDTree(latlong_points)
+
             self.n_grid = len(self.mesh_lat)
             self.b_pointcloud_initial = True
-        except:
-            print("!!! Point cloud not found")
-            raise Exception
-
+            
+        except Exception as e:
+            print("!!! Point cloud not found or failed to load")
+            raise e
 
     def _check(self):
-        if self.b_pointcloud_initial is False:
-            print("!!! Point cloud not initialized")
-            raise Exception
-
+        if not self.b_pointcloud_initial:
+            raise RuntimeError("!!! Point cloud not initialized")
 
     def find(self, x, y, z, n=1, mode='LATLONGZ', b_depth=True):
-        '''
+        """
         Determine the closest N points to (x, y, z) in the point cloud and return the information.
-         :param x:       Either the latitude or UTMX.
-         :param y:       Either the longitude or UTMY.
-         :param z:       The depth or elevation in meter. eg: depth: 2000, elevation: -1200
-         :param n:       The number of point enquired.
-         :return:        The information (see POINT_KEYS) of the closest N points.
-        '''
 
+        :param x:       Either latitude or UTM X
+        :param y:       Either longitude or UTM Y
+        :param z:       Depth or elevation in meter
+        :param n:       Number of nearest neighbors to return
+        :param mode:    'LATLONGZ' or 'UTM'
+        :param b_depth: True->use depth, False->use elevation
+        :return:        Tuple of arrays corresponding to POINT_KEYS
+        """
         self._check()
-
         n = int(n)
-        n_point = len(self.mesh_lat)
-        distance_arr = np.zeros(n_point)
+        if n <= 0:
+            raise ValueError("n must be a positive integer.")
 
-        if str(mode).upper() == str('LATLONGZ'):
-            if b_depth:
-                # use depth.
-                for i in range(n_point):
-                    _dist_H = 111.0 * 1000.0 * np.sqrt(np.square(self.mesh_lat[i] - x) + np.square(self.mesh_long[i]-y))
-                    distance_arr[i] = np.sqrt(np.power(_dist_H, 2) + np.power(self.mesh_depth[i] - z, 2))
+        # Record whether the user requests only one nearest point.
+        return_scalar = (n == 1)
+
+        # Avoid invalid indices when n is larger than the total number of grid points.
+        n = min(n, self.n_grid)
+
+        if mode.upper() == 'LATLONGZ':
+            if not b_depth:
+                # use elevation, compute distances by vectorized operations.
+                dist_H = 111000.0 * np.sqrt((self.mesh_lat - x)**2 + (self.mesh_long - y)**2)
+                dist = np.sqrt(dist_H**2 + (self.mesh_z - z)**2)
+
+                if n > 1:
+                    idx = np.argpartition(dist, n - 1)[:n]
+                else:
+                    idx = np.array([np.argmin(dist)])
+   
             else:
-                # use elevation.
-                for i in range(n_point):
-                    _dist_H = 111.0 * 1000.0 * np.sqrt(np.square(self.mesh_lat[i] - x) + np.square(self.mesh_long[i]-y))
-                    distance_arr[i] = np.sqrt(np.power(_dist_H, 2) + np.power(self.mesh_z[i] - z, 2))
+                # Use depth. Query the cKDTree.
+                query_point = [111000.0*x, 111000.0*y, z]
+                _, idx = self.tree_latlong.query(query_point, k=n)
+                idx = np.atleast_1d(idx).astype(int)
+                dist_H = 111000.0 * np.sqrt(
+                    (self.mesh_lat - x) ** 2 +
+                    (self.mesh_long - y) ** 2
+                )
+                dist = np.sqrt(dist_H ** 2 + (self.mesh_depth - z) ** 2)
 
-        elif str(mode).upper() == str('UTM'):
-            if b_depth:
-                # use depth
-                for i in range(n_point):
-                    distance_arr[i] = np.sqrt(np.power(self.mesh_utm_x[i] - x, 2)
-                                              + np.power(self.mesh_utm_y[i] - y, 2)
-                                              + np.power(self.mesh_depth[i] - z, 2))
+        elif mode.upper() == 'UTM':
+            if not b_depth:
+                # Use elevation. Compute distances by vectorized operations.
+                dist = np.sqrt((self.mesh_utm_x - x)**2 + (self.mesh_utm_y - y)**2 + (self.mesh_z - z)**2)
+                if n > 1:
+                    idx = np.argpartition(dist, n - 1)[:n]
+                else:
+                    idx = np.array([np.argmin(dist)])
+
             else:
-                # use elevation.
-                for i in range(n_point):
-                    distance_arr[i] = np.sqrt(np.power(self.mesh_utm_x[i] - x, 2)
-                                              + np.power(self.mesh_utm_y[i] - y, 2)
-                                              + np.power(self.mesh_z[i] - z, 2))
+                # Use depth. Query the cKDTree.
+                query_point = [x, y, z]
+                _, idx = self.tree_utm.query(query_point, k=n)
+                idx = np.atleast_1d(idx).astype(int)
+                dist = np.sqrt(
+                    (self.mesh_utm_x - x) ** 2 +
+                    (self.mesh_utm_y - y) ** 2 +
+                    (self.mesh_depth - z) ** 2
+                )
+
         else:
-            print("!!! Undefined mode!")
-            raise NotImplementedError
+            raise NotImplementedError("!!! Undefined mode!")
 
-        if 1 == n:
-            idx = np.argmin(distance_arr)
-        else:
-            idx = np.argpartition(distance_arr, n)[:n]
+        # Make idx always an integer array.
+        idx = np.atleast_1d(idx).astype(int)
 
-        return self.mesh_lat[idx], self.mesh_long[idx], self.mesh_z[idx], self.mesh_depth[idx],\
-               self.mesh_utm_x[idx], self.mesh_utm_y[idx], self.mesh_utm_z[idx], \
-               self.mesh_slice_index[idx], self.mesh_element_index[idx], \
-               self.mesh_xi[idx], self.mesh_eta[idx], self.mesh_gamma[idx]
+        # Sort the selected points from nearest to farthest.
+        idx = idx[np.argsort(dist[idx])]
 
+        # If n == 1, return scalar values instead of one-element arrays.
+        if return_scalar:
+            idx = int(idx[0])
+
+        return (self.mesh_lat[idx], self.mesh_long[idx], self.mesh_z[idx], self.mesh_depth[idx],
+                self.mesh_utm_x[idx], self.mesh_utm_y[idx], self.mesh_utm_z[idx],
+                self.mesh_slice_index[idx], self.mesh_element_index[idx],
+                self.mesh_xi[idx], self.mesh_eta[idx], self.mesh_gamma[idx])

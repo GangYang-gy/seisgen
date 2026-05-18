@@ -32,7 +32,7 @@ def DMomentTensor(strike, dip, rake, colatitude, longitude):
     triple_matrix = np.zeros((3, 3))
     triple_matrix[0, 0] = triple[0]
     triple_matrix[1, 1] = triple[1]
-    triple_matrix[2, 2] = triple[2]
+    triple_matrix[2, 2] = triple[2] 
 
     U = DRotationMatrix(strike, dip, rake)
     return np.dot(np.dot(U, triple_matrix), np.linalg.inv(U))
@@ -40,6 +40,9 @@ def DMomentTensor(strike, dip, rake, colatitude, longitude):
 
 def DMT_enz(strike, dip, rake, colatitude, longitude):
     ''' return the moment tensor in e-n-z coord.'''
+    #check
+    #mt_nwz = DMomentTensor(strike, dip, rake, colatitude, longitude)
+
     mt_nwz = DMomentTensor(np.deg2rad(strike), np.deg2rad(dip), np.deg2rad(rake),
                            np.deg2rad(colatitude), np.deg2rad(longitude))
     mt_enz = np.ones(6)

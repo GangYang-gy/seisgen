@@ -16,6 +16,7 @@ def DCreate_Triple(colatitude, longitude):
     '''
     * Create the normalized triple according to the colat. and long. on the Lune.
     * Equ. (7) in Carl's paper (2015).
+
     :param colatitude: The colatitude in the Lune in radians (Beta)
     :param longitude:  The longitude in the Lune in radians (Gamma)
     :return: normalized eigenvalues in descent order (a triple on the LUNE) [e1>e2>e3]
@@ -36,3 +37,4 @@ def DCreate_Triple(colatitude, longitude):
                          np.array([sin_beta * cos_gamma, sin_beta * sin_gamma, cos_beta]).transpose())
 
     return eigenvalues / np.linalg.norm(eigenvalues)
+

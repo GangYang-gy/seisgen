@@ -114,10 +114,11 @@ def DLagrange_interp_sgt(h_xi_arr, h_eta_arr, h_gamma_arr, sgt_arr_list, ngll_x,
     sgt_interp = np.zeros([n_step, n_dim, n_para])
 
     idx_sgt = 0
-    for i in range(ngll_x):
-        for j in range(ngll_y):
-            for k in range(ngll_z):
-                sgt_interp += h_xi_arr[i] * h_eta_arr[j] * h_gamma_arr[k] * sgt_arr_list[idx_sgt]
+    for iz in range(ngll_z):
+        for iy in range(ngll_y):
+            for ix in range(ngll_x):
+                weight = h_xi_arr[ix] * h_eta_arr[iy] * h_gamma_arr[iz]
+                sgt_interp += weight * sgt_arr_list[idx_sgt]
                 idx_sgt += 1
 
     return sgt_interp
